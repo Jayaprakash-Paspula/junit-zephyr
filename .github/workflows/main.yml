@@ -11,68 +11,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------------
-      # Step 1: Checkout source code
-      # ---------------------------------
-      - name: Checkout repository
+      - name: Check for required secrets
+        # This step ensures the required secrets are present before proceeding.
+        run: |
+          if [ -z "${{ secrets.ZEPHYR_PROJECT_KEY }}" ]; then
+            echo "::error::Secret ZEPHYR_PROJECT_KEY is missing or empty. Please set it in your repository secrets."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ZEPHYR_API_TOKEN }}" ]; then
+            echo "::error::Secret ZEPHYR_API_TOKEN is missing or empty. Please set it in your repository secrets."
+            exit 1
+          fi
+      
+      - name: Checkout Repository
         uses: actions/checkout@v4
-
-      # ---------------------------------
-      # Step 2: Set up Java
-      # ---------------------------------
-      - name: Set up Java
+    
+      - name: Set up Java and Maven
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '11'
-          cache: maven
+          java-version: '17' # Adjust to your project's Java version
+          distribution: 'temurin'
+          cache: 'maven'
+    
       - name: Install required tools (zip)
         # Ubuntu runners usually have zip, but this ensures it's available
         run: sudo apt-get install zip -y
     
       - name: Make script.sh executable
         run: chmod +x ./script.sh
-
-      # ---------------------------------
-      # Step 3: Build and run tests
-      # ---------------------------------
-      - name: Build & Test
-        run: mvn clean test
-
-      # ---------------------------------
-      # Step 4: Generate Allure HTML report
-      # ---------------------------------
-      - name: Generate Allure Report
-        run: mvn allure:report
-
-      # ---------------------------------
-      # Step 5: Upload Allure HTML report artifact
-      # ---------------------------------
-      - name: Upload Allure HTML report
-        uses: actions/upload-artifact@v4
-        with:
-          name: allure-html-report
-          path: target/site/allure-maven-plugin
-
-      # ---------------------------------
-      # Step 6: Prepare JUnit XML results (zip)
-      # ---------------------------------
-      - name: Pack JUnit XML to zip
-        run: |
-          zip -j junit-results.zip target/surefire-reports/TEST-*.xml
-      # ---------------------------------
-      # Step 7: Upload JUnit XML to Zephyr Scale Cloud
-      # ---------------------------------
+    
+      - name: Run Maven Tests
+        # The script relies on the JUnit XML files being present, so run tests first
+        run: mvn test
+    
       - name: Upload Results to Zephyr Scale
         id: zephyr_upload
         # Run the script, passing the secrets as arguments
         run: |
           ./script.sh "${{ secrets.ZEPHYR_PROJECT_KEY }}" "${{ secrets.ZEPHYR_API_TOKEN }}"
-      # ---------------------------------
-      # Step 8: Upload raw JUnit XML (debugging only)
-      # ---------------------------------
-      - name: Upload raw JUnit XML
-        uses: actions/upload-artifact@v4
-        with:
-          name: junit-xml
-          path: target/surefire-reports
+        
+        # This step runs if 'mvn test' succeeded or failed, as test reports will be generated either way.
+        if: success() || failure()
