@@ -58,16 +58,11 @@ jobs:
       # ---------------------------------
       # Step 7: Upload JUnit XML to Zephyr Scale Cloud
       # ---------------------------------
-      - name: Upload results to Zephyr Scale Cloud
-        env:
-          ZEPHYR_API_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
-          ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
+      - name: Upload Results to Zephyr Scale
+        id: zephyr_upload
+        # Run the script, passing the secrets as arguments
         run: |
-          echo "Uploading JUnit XML results to Zephyr Scale Cloud..."
-          curl -X POST \
-            -H "Authorization: Bearer ${ZEPHYR_API_TOKEN}" \
-            -F "file=@junit-results.zip;type=application/zip" \
-            "https://api.zephyrscale.smartbear.com/v2/automations/executions/junit?projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
+          ./script.sh "${{ secrets.ZEPHYR_PROJECT_KEY }}" "${{ secrets.ZEPHYR_API_TOKEN }}"
       # ---------------------------------
       # Step 8: Upload raw JUnit XML (debugging only)
       # ---------------------------------
