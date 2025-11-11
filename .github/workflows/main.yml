@@ -26,6 +26,12 @@ jobs:
           distribution: temurin
           java-version: '11'
           cache: maven
+      - name: Install required tools (zip)
+        # Ubuntu runners usually have zip, but this ensures it's available
+        run: sudo apt-get install zip -y
+    
+      - name: Make script.sh executable
+        run: chmod +x ./script.sh
 
       # ---------------------------------
       # Step 3: Build and run tests
