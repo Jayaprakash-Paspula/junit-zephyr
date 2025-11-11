@@ -45,13 +45,6 @@ jobs:
         path: target/site/allure-maven-plugin
         retention-days: 30
 
-    - name: Publish Test Results
-      if: always()
-      uses: EnricoMi/publish-unit-test-result-action@v2
-      with:
-        files: |
-          target/surefire-reports/*.xml
-
     - name: Post results to Zephyr Scale
       if: always()
       env:
