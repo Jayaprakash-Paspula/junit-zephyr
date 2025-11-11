@@ -29,20 +29,15 @@ jobs:
     - name: Generate Allure Report
       run: mvn allure:report
 
-    - name: Upload Allure Results
+    - name: Upload Test Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: allure-results
-        path: target/allure-results
-        retention-days: 30
-
-    - name: Upload Allure Report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: allure-report
-        path: target/site/allure-maven-plugin
+        name: test-reports
+        path: |
+          target/allure-results
+          target/site/allure-maven-plugin
+          target/surefire-reports
         retention-days: 30
 
     - name: Deploy Allure Report to GitHub Pages
@@ -53,54 +48,90 @@ jobs:
         publish_dir: target/site/allure-maven-plugin
         publish_branch: gh-pages
 
-    - name: Install Python Dependencies for Zephyr
-      if: always()
-      run: |
-        pip install requests
-
     - name: Publish Results to Zephyr Scale
       if: always()
       env:
         ZEPHYR_API_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
         ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
-        GITHUB_SHA: ${{ github.sha }}
-        GITHUB_REF_NAME: ${{ github.ref_name }}
-        GITHUB_RUN_NUMBER: ${{ github.run_number }}
       run: |
-        python3 <<'PYTHON_SCRIPT'
+        pip install requests
+        
+        python3 - <<'EOF'
         import xml.etree.ElementTree as ET
         import requests
         import os
         import glob
         from datetime import datetime
         
-        # Zephyr Scale Configuration
-        API_TOKEN = os.environ.get('ZEPHYR_API_TOKEN')
-        PROJECT_KEY = os.environ.get('ZEPHYR_PROJECT_KEY')
+        # Configuration
+        API_TOKEN = os.environ.get('ZEPHYR_API_TOKEN', '')
+        PROJECT_KEY = os.environ.get('ZEPHYR_PROJECT_KEY', '')
         BASE_URL = "https://api.zephyrscale.smartbear.com/v2"
         
+        print("=" * 70)
+        print("ZEPHYR SCALE INTEGRATION")
+        print("=" * 70)
+        
+        # Validate credentials
         if not API_TOKEN or not PROJECT_KEY:
-            print("❌ Zephyr credentials not found. Skipping Zephyr integration.")
+            print("⚠️  Zephyr credentials not configured. Skipping integration.")
+            print("")
+            print("To enable Zephyr integration:")
+            print("1. Go to: https://jayaprakashpaspula581.atlassian.net")
+            print("2. Navigate to Profile > Zephyr Scale API Access Tokens")
+            print("3. Create a new API token")
+            print("4. Add secrets to GitHub:")
+            print("   - ZEPHYR_API_TOKEN: Your API token")
+            print("   - ZEPHYR_PROJECT_KEY: Your project key (e.g., CALC)")
+            print("=" * 70)
             exit(0)
+        
+        print(f"Project Key: {PROJECT_KEY}")
+        print(f"API Token: {'*' * 20}{API_TOKEN[-10:]}")
+        print("")
         
         headers = {
             "Authorization": f"Bearer {API_TOKEN}",
             "Content-Type": "application/json"
         }
         
-        print("=" * 60)
-        print("Starting Zephyr Scale Integration")
-        print("=" * 60)
+        # Test API connection first
+        print("Testing Zephyr API connection...")
+        try:
+            health_response = requests.get(
+                f"{BASE_URL}/healthcheck",
+                headers={"Authorization": f"Bearer {API_TOKEN}"},
+                timeout=10
+            )
+            if health_response.status_code == 200:
+                print("✅ API connection successful")
+            else:
+                print(f"❌ API health check failed: {health_response.status_code}")
+                print(f"Response: {health_response.text}")
+                exit(1)
+        except Exception as e:
+            print(f"❌ Cannot connect to Zephyr API: {str(e)}")
+            exit(1)
         
-        # Step 1: Create Test Cycle
-        cycle_name = f"GitHub Actions Run #{os.environ.get('GITHUB_RUN_NUMBER')} - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        print("")
+        
+        # Create Test Cycle
+        run_number = os.environ.get('GITHUB_RUN_NUMBER', '0')
+        cycle_name = f"GitHub Actions Run #{run_number} - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
         cycle_data = {
             "projectKey": PROJECT_KEY,
             "name": cycle_name,
-            "description": f"Automated test execution from GitHub Actions\n\nCommit: {os.environ.get('GITHUB_SHA', '')[:7]}\nBranch: {os.environ.get('GITHUB_REF_NAME', 'main')}\nWorkflow Run: #{os.environ.get('GITHUB_RUN_NUMBER', 'N/A')}"
+            "description": (
+                f"Automated test execution from GitHub Actions\n\n"
+                f"Commit: {os.environ.get('GITHUB_SHA', 'N/A')[:7]}\n"
+                f"Branch: {os.environ.get('GITHUB_REF_NAME', 'N/A')}\n"
+                f"Run: #{run_number}"
+            )
         }
         
-        print(f"\n📝 Creating test cycle: {cycle_name}")
+        print(f"Creating test cycle: {cycle_name}")
+        
         try:
             cycle_response = requests.post(
                 f"{BASE_URL}/testcycles",
@@ -111,140 +142,147 @@ jobs:
             
             if cycle_response.status_code in [200, 201]:
                 cycle_key = cycle_response.json().get('key')
-                print(f"✅ Test cycle created successfully: {cycle_key}")
+                print(f"✅ Test cycle created: {cycle_key}")
             else:
-                print(f"❌ Failed to create test cycle: {cycle_response.status_code}")
+                print(f"❌ Failed to create test cycle: HTTP {cycle_response.status_code}")
                 print(f"Response: {cycle_response.text}")
+                print("")
+                print("Common issues:")
+                print("- Invalid API token (get new one from Zephyr Scale)")
+                print("- Wrong project key (check your Jira project)")
+                print("- Insufficient permissions (contact Jira admin)")
                 exit(1)
+                
         except Exception as e:
             print(f"❌ Error creating test cycle: {str(e)}")
             exit(1)
         
-        # Step 2: Test Case Mapping (method name -> Zephyr test case key)
+        print("")
+        print("-" * 70)
+        
+        # Test case mapping - UPDATE THIS if your project key is different
+        # Format: 'testMethodName': 'YOUR_PROJECT_KEY-NUMBER'
         test_mapping = {
-            'testAddPositiveNumbers': 'CALC-001',
-            'testAddWithNegative': 'CALC-002',
-            'testSubtract': 'CALC-003',
-            'testMultiply': 'CALC-004',
-            'testDivide': 'CALC-005',
-            'testDivideByZero': 'CALC-006',
-            'testModulo': 'CALC-007',
-            'testModuloByZero': 'CALC-008',
-            'testPower': 'CALC-009',
-            'testSquareRoot': 'CALC-010',
-            'testSquareRootNegative': 'CALC-011'
+            'testAddPositiveNumbers': f'{PROJECT_KEY}-1',
+            'testAddWithNegative': f'{PROJECT_KEY}-2',
+            'testSubtract': f'{PROJECT_KEY}-3',
+            'testMultiply': f'{PROJECT_KEY}-4',
+            'testDivide': f'{PROJECT_KEY}-5',
+            'testDivideByZero': f'{PROJECT_KEY}-6',
+            'testModulo': f'{PROJECT_KEY}-7',
+            'testModuloByZero': f'{PROJECT_KEY}-8',
+            'testPower': f'{PROJECT_KEY}-9',
+            'testSquareRoot': f'{PROJECT_KEY}-10',
+            'testSquareRootNegative': f'{PROJECT_KEY}-11'
         }
         
-        # Step 3: Parse Test Results
+        # Parse test results
         test_files = glob.glob('target/surefire-reports/TEST-*.xml')
         
         if not test_files:
-            print("⚠️ No test result files found")
+            print("⚠️  No test result files found")
             exit(0)
         
-        print(f"\n📊 Found {len(test_files)} test result file(s)")
+        print(f"Found {len(test_files)} test result file(s)")
+        print("")
         
-        total_tests = 0
-        successful_posts = 0
-        failed_posts = 0
+        total = 0
+        posted = 0
+        failed = 0
         
         for test_file in test_files:
-            print(f"\n📄 Processing: {test_file}")
-            
             try:
                 tree = ET.parse(test_file)
                 root = tree.getroot()
                 
                 for testcase in root.findall('testcase'):
                     test_name = testcase.get('name')
-                    execution_time = int(float(testcase.get('time', 0)) * 1000)  # Convert to milliseconds
+                    exec_time = int(float(testcase.get('time', 0)) * 1000)
                     
-                    # Get Zephyr test case key
-                    test_case_key = test_mapping.get(test_name)
+                    test_key = test_mapping.get(test_name)
                     
-                    if not test_case_key:
-                        print(f"  ⚠️ No Zephyr mapping for: {test_name}")
+                    if not test_key:
+                        print(f"⚠️  No mapping for: {test_name}")
                         continue
                     
-                    total_tests += 1
+                    total += 1
                     
-                    # Determine test status
+                    # Determine status
                     failure = testcase.find('failure')
                     error = testcase.find('error')
                     skipped = testcase.find('skipped')
                     
                     if failure is not None:
                         status = 'Fail'
-                        comment = f"Test Failed\n\nFailure Message:\n{failure.get('message', 'No message')}"
-                        if failure.text:
-                            comment += f"\n\nStack Trace:\n{failure.text[:300]}"
+                        msg = failure.get('message', 'Test failed')[:500]
+                        comment = f"❌ Test Failed\n\n{msg}"
                     elif error is not None:
                         status = 'Fail'
-                        comment = f"Test Error\n\nError Message:\n{error.get('message', 'No message')}"
-                        if error.text:
-                            comment += f"\n\nStack Trace:\n{error.text[:300]}"
+                        msg = error.get('message', 'Test error')[:500]
+                        comment = f"❌ Test Error\n\n{msg}"
                     elif skipped is not None:
                         status = 'Blocked'
-                        comment = 'Test was skipped during execution'
+                        comment = "⏸️  Test Skipped"
                     else:
                         status = 'Pass'
-                        comment = f'Test executed successfully\n\nExecution time: {execution_time}ms'
+                        comment = f"✅ Test Passed ({exec_time}ms)"
                     
-                    # Limit comment to 1000 characters
-                    comment = comment[:1000]
-                    
-                    # Step 4: Post Test Execution to Zephyr
-                    execution_data = {
+                    # Post to Zephyr
+                    exec_data = {
                         'projectKey': PROJECT_KEY,
-                        'testCaseKey': test_case_key,
+                        'testCaseKey': test_key,
                         'testCycleKey': cycle_key,
                         'statusName': status,
-                        'executionTime': execution_time,
+                        'executionTime': exec_time,
                         'comment': comment
                     }
                     
                     try:
                         exec_response = requests.post(
                             f"{BASE_URL}/testexecutions",
-                            json=execution_data,
+                            json=exec_data,
                             headers=headers,
                             timeout=30
                         )
                         
                         if exec_response.status_code in [200, 201]:
-                            successful_posts += 1
-                            status_icon = "✅" if status == "Pass" else "❌" if status == "Fail" else "⏸️"
-                            print(f"  {status_icon} {test_case_key}: {status} ({execution_time}ms)")
+                            posted += 1
+                            icon = "✅" if status == "Pass" else "❌" if status == "Fail" else "⏸️"
+                            print(f"{icon} {test_key}: {status} ({exec_time}ms)")
                         else:
-                            failed_posts += 1
-                            print(f"  ❌ Failed to post {test_case_key}: HTTP {exec_response.status_code}")
-                            print(f"     Response: {exec_response.text[:200]}")
-                    
+                            failed += 1
+                            print(f"❌ Failed to post {test_key}: HTTP {exec_response.status_code}")
+                            print(f"   Response: {exec_response.text[:100]}")
+                            
                     except Exception as e:
-                        failed_posts += 1
-                        print(f"  ❌ Error posting {test_case_key}: {str(e)}")
-            
+                        failed += 1
+                        print(f"❌ Error posting {test_key}: {str(e)}")
+                        
             except Exception as e:
-                print(f"  ❌ Error parsing test file: {str(e)}")
+                print(f"❌ Error parsing {test_file}: {str(e)}")
         
-        # Step 5: Summary
-        print("\n" + "=" * 60)
-        print("Zephyr Integration Summary")
-        print("=" * 60)
-        print(f"Total Tests: {total_tests}")
-        print(f"Successfully Posted: {successful_posts}")
-        print(f"Failed to Post: {failed_posts}")
-        print(f"Test Cycle: {cycle_key}")
-        print(f"\n🔗 View results in Zephyr Scale:")
-        print(f"   https://smartbear.com/test-management")
-        print("=" * 60)
+        # Summary
+        print("")
+        print("=" * 70)
+        print("SUMMARY")
+        print("=" * 70)
+        print(f"Total Tests:       {total}")
+        print(f"Posted to Zephyr:  {posted}")
+        print(f"Failed to Post:    {failed}")
+        print(f"Test Cycle:        {cycle_key}")
+        print("")
+        print("🔗 View results:")
+        print(f"   https://jayaprakashpaspula581.atlassian.net/plugins/servlet/ac/com.kanoah.test-manager/zephyr-project-test-cycles")
+        print("=" * 70)
         
-        if failed_posts > 0:
-            print("\n⚠️ Some test results failed to post to Zephyr")
-            exit(0)  # Don't fail the workflow
-        else:
-            print("\n✅ All test results posted successfully!")
-        PYTHON_SCRIPT
+        if failed > 0:
+            print("")
+            print("⚠️  Some results failed to post. Common reasons:")
+            print("   - Test case keys don't exist in Zephyr")
+            print("   - Insufficient permissions")
+            print("   - API rate limiting")
+        
+        EOF
 
     - name: Publish Unit Test Results
       if: always()
@@ -253,7 +291,7 @@ jobs:
         files: |
           target/surefire-reports/*.xml
 
-    - name: Comment PR with Test Results
+    - name: Comment PR with Results
       if: github.event_name == 'pull_request' && always()
       uses: actions/github-script@v7
       with:
@@ -261,62 +299,58 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           
-          let comment = '## 🧪 Test Automation Results\n\n';
+          let comment = '## 🧪 Test Results\n\n';
           
           try {
-            const reportFiles = fs.readdirSync('target/surefire-reports')
+            const files = fs.readdirSync('target/surefire-reports')
               .filter(f => f.endsWith('.xml') && f.startsWith('TEST-'));
             
-            let totalTests = 0;
-            let passedTests = 0;
-            let failedTests = 0;
-            let skippedTests = 0;
+            let total = 0, passed = 0, failed = 0, skipped = 0;
             
-            reportFiles.forEach(file => {
+            files.forEach(file => {
               const content = fs.readFileSync(
                 path.join('target/surefire-reports', file), 
                 'utf8'
               );
               
-              const testsMatch = content.match(/tests="(\d+)"/);
-              const failuresMatch = content.match(/failures="(\d+)"/);
-              const skippedMatch = content.match(/skipped="(\d+)"/);
+              const t = content.match(/tests="(\d+)"/);
+              const f = content.match(/failures="(\d+)"/);
+              const e = content.match(/errors="(\d+)"/);
+              const s = content.match(/skipped="(\d+)"/);
               
-              if (testsMatch) totalTests += parseInt(testsMatch[1]);
-              if (failuresMatch) failedTests += parseInt(failuresMatch[1]);
-              if (skippedMatch) skippedTests += parseInt(skippedMatch[1]);
+              if (t) total += parseInt(t[1]);
+              if (f) failed += parseInt(f[1]);
+              if (e) failed += parseInt(e[1]);
+              if (s) skipped += parseInt(s[1]);
             });
             
-            passedTests = totalTests - failedTests - skippedTests;
+            passed = total - failed - skipped;
+            const rate = total > 0 ? ((passed / total) * 100).toFixed(1) : 0;
             
-            const passRate = totalTests > 0 ? ((passedTests / totalTests) * 100).toFixed(1) : 0;
+            comment += '| Metric | Value |\n';
+            comment += '|--------|-------|\n';
+            comment += `| ✅ Passed | ${passed} |\n`;
+            comment += `| ❌ Failed | ${failed} |\n`;
+            comment += `| ⏸️ Skipped | ${skipped} |\n`;
+            comment += `| 📊 Total | ${total} |\n`;
+            comment += `| 🎯 Pass Rate | ${rate}% |\n\n`;
             
-            comment += '### 📊 Summary\n\n';
-            comment += `| Metric | Count |\n`;
-            comment += `|--------|-------|\n`;
-            comment += `| ✅ Passed | ${passedTests} |\n`;
-            comment += `| ❌ Failed | ${failedTests} |\n`;
-            comment += `| ⏸️ Skipped | ${skippedTests} |\n`;
-            comment += `| 📈 Total | ${totalTests} |\n`;
-            comment += `| 🎯 Pass Rate | ${passRate}% |\n\n`;
+            comment += '### 📁 Reports\n\n';
+            comment += `- [View Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
+            comment += `- [Download Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)\n`;
+            comment += `- [Zephyr Test Cycles](https://jayaprakashpaspula581.atlassian.net)\n\n`;
             
-            if (failedTests > 0) {
-              comment += '### ❌ Failed Tests\n\n';
-              comment += 'Please check the workflow logs for details.\n\n';
+            if (passed === total && total > 0) {
+              comment += '### 🎉 All Tests Passed!\n\n';
+            } else if (failed > 0) {
+              comment += '### ⚠️ Some Tests Failed\n\n';
+              comment += 'Check the workflow logs for details.\n\n';
             }
             
-            comment += '### 📁 Artifacts\n\n';
-            comment += `- [Download Allure Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
-            comment += `- [View Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n`;
-            
-            comment += '### 🔗 Zephyr Scale\n\n';
-            comment += 'Test results have been published to Zephyr Scale. Check your Zephyr dashboard for detailed execution results.\n\n';
-            
-            comment += `---\n*Automated by GitHub Actions - Run #${{ github.run_number }}*`;
+            comment += `---\n*Run #${{ github.run_number }} • ${new Date().toISOString()}*`;
             
           } catch (error) {
-            comment += '⚠️ Unable to parse test results\n';
-            comment += `Error: ${error.message}\n`;
+            comment += `⚠️ Error: ${error.message}\n`;
           }
           
           github.rest.issues.createComment({
