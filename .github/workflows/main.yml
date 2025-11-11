@@ -1,361 +1,54 @@
-name: Java Calculator Test Automation with Zephyr
+name: Java CI with Maven, Allure & Zephyr Scale Cloud
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        cache: maven
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
+          cache: maven
 
-    - name: Run Maven Tests
-      run: mvn clean test
-      continue-on-error: true
+      - name: Build & run tests
+        run: mvn -B clean test
 
-    - name: Generate Allure Report
-      run: mvn allure:report
+      - name: Generate Allure report
+        run: mvn -B allure:report
 
-    - name: Upload Test Artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-reports
-        path: |
-          target/allure-results
-          target/site/allure-maven-plugin
-          target/surefire-reports
-        retention-days: 30
+      - name: Upload Allure HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-html-report
+          path: target/site/allure-maven-plugin
 
-    - name: Deploy Allure Report to GitHub Pages
-      if: github.ref == 'refs/heads/main' && always()
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: target/site/allure-maven-plugin
-        publish_branch: gh-pages
+      - name: Zip JUnit XML test results
+        run: zip -j junit-results.zip target/surefire-reports/TEST-*.xml
 
-    - name: Publish Results to Zephyr Scale
-      if: always()
-      env:
-        ZEPHYR_API_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
-        ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
-      run: |
-        pip install requests
-        
-        python3 - <<'EOF'
-        import xml.etree.ElementTree as ET
-        import requests
-        import os
-        import glob
-        from datetime import datetime
-        
-        # Configuration
-        API_TOKEN = os.environ.get('ZEPHYR_API_TOKEN', '')
-        PROJECT_KEY = os.environ.get('ZEPHYR_PROJECT_KEY', '')
-        BASE_URL = "https://api.zephyrscale.smartbear.com/v2"
-        
-        print("=" * 70)
-        print("ZEPHYR SCALE INTEGRATION")
-        print("=" * 70)
-        
-        # Validate credentials
-        if not API_TOKEN or not PROJECT_KEY:
-            print("⚠️  Zephyr credentials not configured. Skipping integration.")
-            print("")
-            print("To enable Zephyr integration:")
-            print("1. Go to: https://jayaprakashpaspula581.atlassian.net")
-            print("2. Navigate to Profile > Zephyr Scale API Access Tokens")
-            print("3. Create a new API token")
-            print("4. Add secrets to GitHub:")
-            print("   - ZEPHYR_API_TOKEN: Your API token")
-            print("   - ZEPHYR_PROJECT_KEY: Your project key (e.g., CALC)")
-            print("=" * 70)
-            exit(0)
-        
-        print(f"Project Key: {PROJECT_KEY}")
-        print(f"API Token: {'*' * 20}{API_TOKEN[-10:]}")
-        print("")
-        
-        headers = {
-            "Authorization": f"Bearer {API_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        
-        # Test API connection first
-        print("Testing Zephyr API connection...")
-        try:
-            health_response = requests.get(
-                f"{BASE_URL}/healthcheck",
-                headers={"Authorization": f"Bearer {API_TOKEN}"},
-                timeout=10
-            )
-            if health_response.status_code == 200:
-                print("✅ API connection successful")
-            else:
-                print(f"❌ API health check failed: {health_response.status_code}")
-                print(f"Response: {health_response.text}")
-                exit(1)
-        except Exception as e:
-            print(f"❌ Cannot connect to Zephyr API: {str(e)}")
-            exit(1)
-        
-        print("")
-        
-        # Create Test Cycle
-        run_number = os.environ.get('GITHUB_RUN_NUMBER', '0')
-        cycle_name = f"GitHub Actions Run #{run_number} - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        
-        cycle_data = {
-            "projectKey": PROJECT_KEY,
-            "name": cycle_name,
-            "description": (
-                f"Automated test execution from GitHub Actions\n\n"
-                f"Commit: {os.environ.get('GITHUB_SHA', 'N/A')[:7]}\n"
-                f"Branch: {os.environ.get('GITHUB_REF_NAME', 'N/A')}\n"
-                f"Run: #{run_number}"
-            )
-        }
-        
-        print(f"Creating test cycle: {cycle_name}")
-        
-        try:
-            cycle_response = requests.post(
-                f"{BASE_URL}/testcycles",
-                json=cycle_data,
-                headers=headers,
-                timeout=30
-            )
-            
-            if cycle_response.status_code in [200, 201]:
-                cycle_key = cycle_response.json().get('key')
-                print(f"✅ Test cycle created: {cycle_key}")
-            else:
-                print(f"❌ Failed to create test cycle: HTTP {cycle_response.status_code}")
-                print(f"Response: {cycle_response.text}")
-                print("")
-                print("Common issues:")
-                print("- Invalid API token (get new one from Zephyr Scale)")
-                print("- Wrong project key (check your Jira project)")
-                print("- Insufficient permissions (contact Jira admin)")
-                exit(1)
-                
-        except Exception as e:
-            print(f"❌ Error creating test cycle: {str(e)}")
-            exit(1)
-        
-        print("")
-        print("-" * 70)
-        
-        # Test case mapping - UPDATE THIS if your project key is different
-        # Format: 'testMethodName': 'YOUR_PROJECT_KEY-NUMBER'
-        test_mapping = {
-            'testAddPositiveNumbers': f'{PROJECT_KEY}-1',
-            'testAddWithNegative': f'{PROJECT_KEY}-2',
-            'testSubtract': f'{PROJECT_KEY}-3',
-            'testMultiply': f'{PROJECT_KEY}-4',
-            'testDivide': f'{PROJECT_KEY}-5',
-            'testDivideByZero': f'{PROJECT_KEY}-6',
-            'testModulo': f'{PROJECT_KEY}-7',
-            'testModuloByZero': f'{PROJECT_KEY}-8',
-            'testPower': f'{PROJECT_KEY}-9',
-            'testSquareRoot': f'{PROJECT_KEY}-10',
-            'testSquareRootNegative': f'{PROJECT_KEY}-11'
-        }
-        
-        # Parse test results
-        test_files = glob.glob('target/surefire-reports/TEST-*.xml')
-        
-        if not test_files:
-            print("⚠️  No test result files found")
-            exit(0)
-        
-        print(f"Found {len(test_files)} test result file(s)")
-        print("")
-        
-        total = 0
-        posted = 0
-        failed = 0
-        
-        for test_file in test_files:
-            try:
-                tree = ET.parse(test_file)
-                root = tree.getroot()
-                
-                for testcase in root.findall('testcase'):
-                    test_name = testcase.get('name')
-                    exec_time = int(float(testcase.get('time', 0)) * 1000)
-                    
-                    test_key = test_mapping.get(test_name)
-                    
-                    if not test_key:
-                        print(f"⚠️  No mapping for: {test_name}")
-                        continue
-                    
-                    total += 1
-                    
-                    # Determine status
-                    failure = testcase.find('failure')
-                    error = testcase.find('error')
-                    skipped = testcase.find('skipped')
-                    
-                    if failure is not None:
-                        status = 'Fail'
-                        msg = failure.get('message', 'Test failed')[:500]
-                        comment = f"❌ Test Failed\n\n{msg}"
-                    elif error is not None:
-                        status = 'Fail'
-                        msg = error.get('message', 'Test error')[:500]
-                        comment = f"❌ Test Error\n\n{msg}"
-                    elif skipped is not None:
-                        status = 'Blocked'
-                        comment = "⏸️  Test Skipped"
-                    else:
-                        status = 'Pass'
-                        comment = f"✅ Test Passed ({exec_time}ms)"
-                    
-                    # Post to Zephyr
-                    exec_data = {
-                        'projectKey': PROJECT_KEY,
-                        'testCaseKey': test_key,
-                        'testCycleKey': cycle_key,
-                        'statusName': status,
-                        'executionTime': exec_time,
-                        'comment': comment
-                    }
-                    
-                    try:
-                        exec_response = requests.post(
-                            f"{BASE_URL}/testexecutions",
-                            json=exec_data,
-                            headers=headers,
-                            timeout=30
-                        )
-                        
-                        if exec_response.status_code in [200, 201]:
-                            posted += 1
-                            icon = "✅" if status == "Pass" else "❌" if status == "Fail" else "⏸️"
-                            print(f"{icon} {test_key}: {status} ({exec_time}ms)")
-                        else:
-                            failed += 1
-                            print(f"❌ Failed to post {test_key}: HTTP {exec_response.status_code}")
-                            print(f"   Response: {exec_response.text[:100]}")
-                            
-                    except Exception as e:
-                        failed += 1
-                        print(f"❌ Error posting {test_key}: {str(e)}")
-                        
-            except Exception as e:
-                print(f"❌ Error parsing {test_file}: {str(e)}")
-        
-        # Summary
-        print("")
-        print("=" * 70)
-        print("SUMMARY")
-        print("=" * 70)
-        print(f"Total Tests:       {total}")
-        print(f"Posted to Zephyr:  {posted}")
-        print(f"Failed to Post:    {failed}")
-        print(f"Test Cycle:        {cycle_key}")
-        print("")
-        print("🔗 View results:")
-        print(f"   https://jayaprakashpaspula581.atlassian.net/plugins/servlet/ac/com.kanoah.test-manager/zephyr-project-test-cycles")
-        print("=" * 70)
-        
-        if failed > 0:
-            print("")
-            print("⚠️  Some results failed to post. Common reasons:")
-            print("   - Test case keys don't exist in Zephyr")
-            print("   - Insufficient permissions")
-            print("   - API rate limiting")
-        
-        EOF
+      - name: Upload JUnit XML to Zephyr Scale Cloud (SmartBear)
+        env:
+          ZEPHYR_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
+          ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
+        run: |
+          echo "Uploading JUnit XML results to Zephyr Scale Cloud..."
+          curl -X POST \
+            -H "Authorization: Bearer ${ZEPHYR_TOKEN}" \
+            -F "file=@junit-results.zip;type=application/zip" \
+            "https://api.zephyrscale.smartbear.com/v2/automations/executions/junit?projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
 
-    - name: Publish Unit Test Results
-      if: always()
-      uses: EnricoMi/publish-unit-test-result-action@v2
-      with:
-        files: |
-          target/surefire-reports/*.xml
-
-    - name: Comment PR with Results
-      if: github.event_name == 'pull_request' && always()
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          const path = require('path');
-          
-          let comment = '## 🧪 Test Results\n\n';
-          
-          try {
-            const files = fs.readdirSync('target/surefire-reports')
-              .filter(f => f.endsWith('.xml') && f.startsWith('TEST-'));
-            
-            let total = 0, passed = 0, failed = 0, skipped = 0;
-            
-            files.forEach(file => {
-              const content = fs.readFileSync(
-                path.join('target/surefire-reports', file), 
-                'utf8'
-              );
-              
-              const t = content.match(/tests="(\d+)"/);
-              const f = content.match(/failures="(\d+)"/);
-              const e = content.match(/errors="(\d+)"/);
-              const s = content.match(/skipped="(\d+)"/);
-              
-              if (t) total += parseInt(t[1]);
-              if (f) failed += parseInt(f[1]);
-              if (e) failed += parseInt(e[1]);
-              if (s) skipped += parseInt(s[1]);
-            });
-            
-            passed = total - failed - skipped;
-            const rate = total > 0 ? ((passed / total) * 100).toFixed(1) : 0;
-            
-            comment += '| Metric | Value |\n';
-            comment += '|--------|-------|\n';
-            comment += `| ✅ Passed | ${passed} |\n`;
-            comment += `| ❌ Failed | ${failed} |\n`;
-            comment += `| ⏸️ Skipped | ${skipped} |\n`;
-            comment += `| 📊 Total | ${total} |\n`;
-            comment += `| 🎯 Pass Rate | ${rate}% |\n\n`;
-            
-            comment += '### 📁 Reports\n\n';
-            comment += `- [View Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
-            comment += `- [Download Test Reports](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)\n`;
-            comment += `- [Zephyr Test Cycles](https://jayaprakashpaspula581.atlassian.net)\n\n`;
-            
-            if (passed === total && total > 0) {
-              comment += '### 🎉 All Tests Passed!\n\n';
-            } else if (failed > 0) {
-              comment += '### ⚠️ Some Tests Failed\n\n';
-              comment += 'Check the workflow logs for details.\n\n';
-            }
-            
-            comment += `---\n*Run #${{ github.run_number }} • ${new Date().toISOString()}*`;
-            
-          } catch (error) {
-            comment += `⚠️ Error: ${error.message}\n`;
-          }
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
+      - name: Upload JUnit test results (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-junit-xml
+          path: target/surefire-reports/
