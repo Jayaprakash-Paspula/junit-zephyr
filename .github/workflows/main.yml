@@ -1,4 +1,4 @@
-name: Java CI with Maven + Allur + Zephyr
+name: Java CI with Maven + Allure + Zephyr
 
 on:
   push:
