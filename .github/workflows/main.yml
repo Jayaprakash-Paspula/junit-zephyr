@@ -45,7 +45,7 @@ jobs:
           curl -X POST \
             -H "Authorization: Bearer ${ZEPHYR_TOKEN}" \
             -F "file=@junit-results.zip;type=application/zip" \
-            "https://api.zephyrscale.smartbear.com/v2/automations/executions/junit?projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
+            "https://jayaprakashpaspula581.atlassian.net/projects/projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
 
       - name: Upload JUnit test results (debug)
         uses: actions/upload-artifact@v4
