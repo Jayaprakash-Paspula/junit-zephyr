@@ -60,19 +60,14 @@ jobs:
       # ---------------------------------
       - name: Upload results to Zephyr Scale Cloud
         env:
-          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          ZEPHYR_API_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
           ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
         run: |
-          echo "Encoding Jira email + API token..."
-          AUTH=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64)
-
           echo "Uploading JUnit XML results to Zephyr Scale Cloud..."
           curl -X POST \
-            -H "Authorization: Basic ${AUTH}" \
+            -H "Authorization: Bearer ${ZEPHYR_API_TOKEN}" \
             -F "file=@junit-results.zip;type=application/zip" \
             "https://api.zephyrscale.smartbear.com/v2/automations/executions/junit?projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
-
       # ---------------------------------
       # Step 8: Upload raw JUnit XML (debugging only)
       # ---------------------------------
