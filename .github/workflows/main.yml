@@ -1,4 +1,4 @@
-name: Java CI with Maven, Allure & Zephyr Scale Cloud
+name: Java CI with Maven + Allure + Zephyr Scale Cloud
 
 on:
   push:
@@ -7,48 +7,77 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
+  build-test-report:
     runs-on: ubuntu-latest
 
     steps:
+      # ---------------------------------
+      # Step 1: Checkout source code
+      # ---------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------
+      # Step 2: Set up Java
+      # ---------------------------------
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 11
+          java-version: '11'
           cache: maven
 
-      - name: Build & run tests
-        run: mvn -B clean test
+      # ---------------------------------
+      # Step 3: Build and run tests
+      # ---------------------------------
+      - name: Build & Test
+        run: mvn clean test
 
-      - name: Generate Allure report
-        run: mvn -B allure:report
+      # ---------------------------------
+      # Step 4: Generate Allure HTML report
+      # ---------------------------------
+      - name: Generate Allure Report
+        run: mvn allure:report
 
+      # ---------------------------------
+      # Step 5: Upload Allure HTML report artifact
+      # ---------------------------------
       - name: Upload Allure HTML report
         uses: actions/upload-artifact@v4
         with:
           name: allure-html-report
           path: target/site/allure-maven-plugin
 
-      - name: Zip JUnit XML test results
-        run: zip -j junit-results.zip target/surefire-reports/TEST-*.xml
+      # ---------------------------------
+      # Step 6: Prepare JUnit XML results (zip)
+      # ---------------------------------
+      - name: Pack JUnit XML to zip
+        run: |
+          zip -j junit-results.zip target/surefire-reports/TEST-*.xml
 
-      - name: Upload JUnit XML to Zephyr Scale Cloud (SmartBear)
+      # ---------------------------------
+      # Step 7: Upload JUnit XML to Zephyr Scale Cloud
+      # ---------------------------------
+      - name: Upload results to Zephyr Scale Cloud
         env:
-          ZEPHYR_TOKEN: ${{ secrets.ZEPHYR_API_TOKEN }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           ZEPHYR_PROJECT_KEY: ${{ secrets.ZEPHYR_PROJECT_KEY }}
         run: |
+          echo "Encoding Jira email + API token..."
+          AUTH=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64)
+
           echo "Uploading JUnit XML results to Zephyr Scale Cloud..."
           curl -X POST \
-            -H "Authorization: Bearer ${ZEPHYR_TOKEN}" \
+            -H "Authorization: Basic ${AUTH}" \
             -F "file=@junit-results.zip;type=application/zip" \
-            "https://jayaprakashpaspula581.atlassian.net/projects/projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
+            "https://api.zephyrscale.smartbear.com/v2/automations/executions/junit?projectKey=${ZEPHYR_PROJECT_KEY}&autoCreateTestCases=true"
 
-      - name: Upload JUnit test results (debug)
+      # ---------------------------------
+      # Step 8: Upload raw JUnit XML (debugging only)
+      # ---------------------------------
+      - name: Upload raw JUnit XML
         uses: actions/upload-artifact@v4
         with:
-          name: raw-junit-xml
-          path: target/surefire-reports/
+          name: junit-xml
+          path: target/surefire-reports
