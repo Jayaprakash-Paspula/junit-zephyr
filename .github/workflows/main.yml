@@ -1,81 +1,49 @@
-name: "junit-allure-zephyr"
-
+name: "e2e"
 on: [push]
-
 jobs:
-  test-automation:
-    name: Run JUnit + Allure + Zephyr
+  test-e2e:
+    name: Run E2E tests
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v3
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v2
         with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Cache Maven Dependencies
-        uses: actions/cache@v3
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+      - name: Run your tests
+        run: npx playwright test
+      - name: Upload allure report results
+        if: always()
+        uses: actions/upload-artifact@v2
         with:
-          path: ~/.m2
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-maven
-
-      - name: Run Maven Tests
-        run: mvn clean test
-
-      # --------------------
-      # Upload Allure Results
-      # --------------------
-      - name: Upload Allure Results
+          name: Allure Report
+          path: test-results
+      - name: Upload JUnit artifact
         if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: allure-results
-          path: target/allure-results
-
-      # --------------------
-      # Prepare JUnit XML for Zephyr
-      # --------------------
-      - name: Prepare JUnit Report
-        if: always()
-        run: |
-          mkdir -p test-results
-          cp target/surefire-reports/*.xml test-results/results.xml
-
-      - name: Upload JUnit Artifact
-        if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2
         with:
           name: junit-artifact
-          path: test-results/results.xml
-
-      - name: Download JUnit Artifact
+          path: playwright-report
+      - name: Download Artifact
         if: always()
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: junit-artifact
           path: download-artifact
-
-      - name: Get JUnit File Path
+      - name: Get File Info
         id: file
         if: always()
         run: |
-          relative_path="download-artifact/results.xml"
-          absolute_path="${{ github.workspace }}/$relative_path"
-          echo "JUnit file path: $absolute_path"
-          echo "path=$absolute_path" >> $GITHUB_OUTPUT
-
-      # --------------------
-      # Upload Results to Zephyr
-      # --------------------
-      - name: Upload JUnit Results to Zephyr
+          relative_path="download-artifact/results.xml"                      
+          absolute_path="${{ github.workspace }}/$relative_path"                                  
+          echo "Absolute path of the downloaded file: $absolute_path"
+          file_size=$(stat -c%s "$absolute_path")                      
+          echo "::set-output name=path::$absolute_path"                       
+          echo "Size of the downloaded file: $file_size"
+      - name: upload to Zephyr via curl
         if: always()
-        run: >
-          curl --location --request POST
-          '${{ vars.ZEPHYR_BASE_URL }}/automations/executions/junit?autoCreateTestCases=true&projectKey=${{ vars.ZEPHYR_PROJECT_KEY }}'
-          --header 'Authorization: Bearer ${{ secrets.ZEPHYR_TOKEN }}'
-          --form 'file=@"${{ steps.file.outputs.path }}"'
+        run: >-
+          curl --location --request POST '${{ vars.ZEPHYR_BASE_URL }}/automations/executions/junit?autoCreateTestCases=true&projectKey=${{ vars.ZEPHYR_PROJECT_KEY }}' --header 'Authorization: Bearer ${{ secrets.ZEPHYR_TOKEN }}' --form 'file=@"${{ steps.file.outputs.path }}"'       
